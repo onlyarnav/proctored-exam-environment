@@ -18,6 +18,8 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      - name: Build shared-types package
+        run: npm run build -w packages/shared-types
       - name: Generate Prisma Client
         run: |
           cd apps/api
@@ -59,12 +61,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
       - name: Install dependencies and test
         run: |
           cd apps/ml-service
           uv venv
           uv pip install -r requirements.txt
-          # Run pytest
-          pytest
+          # Run pytest inside the virtualenv
+          .venv/bin/pytest
