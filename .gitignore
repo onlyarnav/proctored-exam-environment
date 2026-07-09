@@ -49,4 +49,3 @@ miniodata/
 docker-compose.override.yml
 
 # Temporary exclusion for docs folder as requested (User will push it themselves)
-docs/
