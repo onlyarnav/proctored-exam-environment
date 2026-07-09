@@ -1,0 +1,17 @@
+{
+  "name": "proctored-exam-environment",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared-types"
+  ],
+  "scripts": {
+    "api:dev": "npm run dev -w apps/api",
+    "api:test": "npm run test -w apps/api",
+    "api:test:e2e": "npm run test:e2e -w apps/api",
+    "web:dev": "npm run dev -w apps/web",
+    "lint": "npm run lint -w apps/api -w apps/web"
+  }
+}

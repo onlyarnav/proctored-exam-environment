@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: |
+          cd apps/api
+          npx prisma generate
+      - name: Run Unit Tests
+        run: npm run test -w apps/api
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run Tests with race detector
+        run: |
+          cd apps/proctor-gateway
+          go test ./... -race -v
+
+  judge-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run Tests
+        run: |
+          cd apps/judge-worker
+          go test ./... -v
+
+  ml-service-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install dependencies and test
+        run: |
+          cd apps/ml-service
+          uv venv
+          uv pip install -r requirements.txt
+          # Run pytest
+          pytest

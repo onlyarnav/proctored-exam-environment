@@ -1,0 +1,55 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  PROCTOR
+  ADMIN
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  role          Role     @default(STUDENT)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique   // never store raw token, hash it (SHA-256) same as password approach
+  issuedAt   DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?              // token rotation chain — set when this token is used to issue a new one
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?              // nullable: system-triggered actions have no actor
+  action     String               // e.g. "USER_LOGIN", "REFRESH_TOKEN_REUSE_DETECTED"
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  correlationId String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
