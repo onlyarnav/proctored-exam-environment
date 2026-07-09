@@ -1,13 +1,13 @@
 # Project Status — AI Olympiad Proctored Exam Platform
 
 **Last updated:** 2026-07-09
-**Current phase:** Not started — Phase 1 up next
+**Current phase:** Phase 1 complete — Phase 2 up next
 
 ## Phase overview
 
 | Phase | Name | Status | Notes |
 |---|---|---|---|
-| 1 | Foundation & Infrastructure | Not started | Monorepo, Docker Compose, DB schema, auth skeleton |
+| 1 | Foundation & Infrastructure | Done | Monorepo, Docker Compose, DB schema, auth skeleton |
 | 2 | Core Exam Engine | Not started | Exam CRUD, questions, sessions, judge worker |
 | 3 | Realtime Proctoring Gateway | Not started | Go WS gateway, event/frame ingestion, Redis Streams |
 | 4 | ML Flagging Service | Not started | Face/gaze/object detection, flag pipeline, MinIO |
@@ -23,6 +23,9 @@
 | 2026-07-09 | No video recording — flagged frames only | Product/privacy decision, non-negotiable |
 | 2026-07-09 | Server-side ML flagging (not client-side TF.js) | Centralizes detection logic, avoids trusting client, easier to iterate on models |
 | 2026-07-09 | Proctoring signals: webcam (live, unrecorded) + tab-switch + copy-paste — no screen recording | Scope decision for v1 |
+| 2026-07-10 | Argon2id password hashing | Chosen over bcrypt for better resistance to GPU-based brute-force cracking |
+| 2026-07-10 | SHA-256 Refresh Token hashing | Storing hashed refresh tokens prevents session hijacking in the event of a database leak |
+| 2026-07-10 | Deny-by-default RBAC | Every route blocks access unless explicitly decorated with a `@Roles()` permission or marked `@Public()` |
 
 ## Resolved questions
 
