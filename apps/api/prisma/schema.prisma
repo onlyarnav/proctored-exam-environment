@@ -53,3 +53,84 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
+
+enum QuestionType {
+  MCQ
+  CODE
+}
+
+model Question {
+  id           String         @id @default(uuid())
+  type         QuestionType
+  prompt       String
+  options      Json?          // MCQ only: [{id, text}]
+  correctOption String?       // MCQ only: option id
+  starterCode  Json?          // CODE only: { python: "...", cpp: "...", ... }
+  testCases    Json?          // CODE only: [{ input, expectedOutput, isPublic }]
+  points       Int
+  topic        String?
+  difficulty   String?
+  createdAt    DateTime       @default(now())
+  exams        ExamQuestion[]
+
+  @@index([type])
+}
+
+model Exam {
+  id              String         @id @default(uuid())
+  title           String
+  description     String?
+  startsAt        DateTime
+  endsAt          DateTime
+  durationMinutes Int
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  questions       ExamQuestion[]
+  sessions        ExamSession[]
+}
+
+model ExamQuestion {
+  examId     String
+  questionId String
+  order      Int
+  points     Int            // per-exam override; falls back to Question.points if not set
+  exam       Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([examId, questionId])
+}
+
+enum SessionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+model ExamSession {
+  id           String        @id @default(uuid())
+  examId       String
+  userId       String
+  status       SessionStatus @default(NOT_STARTED)
+  startedAt    DateTime?
+  submittedAt  DateTime?
+  score        Float?
+  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  submissions  Submission[]
+
+  @@unique([examId, userId])   // one session per candidate per exam — enforces the single-active-session rule at the DB level
+}
+
+model Submission {
+  id             String      @id @default(uuid())
+  sessionId      String
+  questionId     String
+  answer         Json        // MCQ: { selectedOption }, CODE: { language, code }
+  autoScore      Float?
+  gradedAt       DateTime?
+  idempotencyKey String?     @unique   // dedupes retried submit calls
+  createdAt      DateTime    @default(now())
+  session        ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionId])   // one submission per question per session — resubmits UPDATE, not INSERT
+}
