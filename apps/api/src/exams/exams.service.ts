@@ -536,11 +536,13 @@ export class ExamsService {
         const code = answerObj?.code;
         const language = answerObj?.language;
 
+        const points = examQuestion.points !== null && examQuestion.points !== undefined ? examQuestion.points : q.points;
         const job = {
           submissionId: sub.id,
           language,
           code,
           testCases: q.testCases || [],
+          points,
           idempotencyKey: sub.idempotencyKey || sub.id,
           correlationId,
         };
