@@ -1,6 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
+import { ExamsModule } from './exams/exams.module';
 import { PrismaService } from './prisma.service';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -11,7 +12,7 @@ import { RateLimitMiddleware } from './common/middleware/rate-limit.middleware';
 import { AppController } from './app.controller';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ExamsModule],
   controllers: [AppController],
   providers: [
     PrismaService,
