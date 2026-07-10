@@ -1,12 +1,16 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { ErrorCode } from 'shared-types';
+import { RedisService } from '../common/redis.service';
 
 @Injectable()
 export class ExamsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
+  ) {}
 
   // ==========================================
   // QUESTIONS CRUD (ADMIN ONLY)
@@ -327,5 +331,222 @@ export class ExamsService {
     }
 
     return session;
+  }
+
+  async saveDraftAnswer(sessionId: string, userId: string, questionId: string, answer: any) {
+    const now = new Date();
+    
+    // Fetch session and exam
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: { exam: true },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Exam session ${sessionId} not found`);
+    }
+
+    if (session.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this session');
+    }
+
+    // Check if session is active
+    const startedTime = new Date(session.startedAt!).getTime();
+    const durationMs = session.exam.durationMinutes * 60 * 1000;
+    const limitTime = startedTime + durationMs;
+    const examEndsTime = new Date(session.exam.endsAt).getTime();
+
+    if (session.status !== 'IN_PROGRESS' || now.getTime() > limitTime || now.getTime() > examEndsTime) {
+      if (session.status === 'IN_PROGRESS') {
+        await this.prisma.examSession.update({
+          where: { id: sessionId },
+          data: {
+            status: 'SUBMITTED',
+            submittedAt: new Date(Math.min(limitTime, examEndsTime)),
+          },
+        });
+      }
+      throw new ConflictException({
+        code: 'SESSION_EXPIRED',
+        message: 'This exam session has already expired or been submitted',
+      });
+    }
+
+    // Perform upsert on Submission
+    return this.prisma.submission.upsert({
+      where: {
+        sessionId_questionId: {
+          sessionId,
+          questionId,
+        },
+      },
+      update: {
+        answer: answer ? JSON.parse(JSON.stringify(answer)) : null,
+        createdAt: now,
+      },
+      create: {
+        sessionId,
+        questionId,
+        answer: answer ? JSON.parse(JSON.stringify(answer)) : null,
+      },
+    });
+  }
+
+  async submitExamSession(sessionId: string, userId: string, correlationId: string, idempotencyKey?: string) {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      // Row locking on ExamSession
+      const sessions = await tx.$queryRaw<any[]>`
+        SELECT * FROM "ExamSession" 
+        WHERE "id" = ${sessionId} 
+        LIMIT 1 
+        FOR UPDATE
+      `;
+
+      if (sessions.length === 0) {
+        throw new NotFoundException(`Exam session ${sessionId} not found`);
+      }
+
+      const session = sessions[0];
+
+      if (session.userId !== userId) {
+        throw new ForbiddenException('You do not have access to this session');
+      }
+
+      // Idempotency: If already submitted or graded
+      if (session.status === 'SUBMITTED' || session.status === 'GRADED') {
+        if (idempotencyKey && session.idempotencyKey === idempotencyKey) {
+          return session;
+        }
+        throw new ConflictException({
+          code: 'SESSION_ALREADY_SUBMITTED',
+          message: 'This session has already been submitted',
+        });
+      }
+
+      // Check time limit
+      const startedTime = new Date(session.startedAt).getTime();
+      const exam = await tx.exam.findUnique({ where: { id: session.examId } });
+      if (!exam) {
+        throw new NotFoundException('Exam not found');
+      }
+      const durationMs = exam.durationMinutes * 60 * 1000;
+      const limitTime = startedTime + durationMs;
+      const examEndsTime = new Date(exam.endsAt).getTime();
+
+      if (now.getTime() > limitTime || now.getTime() > examEndsTime) {
+        const finalSubmitTime = new Date(Math.min(limitTime, examEndsTime));
+        const updated = await tx.examSession.update({
+          where: { id: sessionId },
+          data: {
+            status: 'SUBMITTED',
+            submittedAt: finalSubmitTime,
+            idempotencyKey: idempotencyKey || null,
+          },
+        });
+        
+        await this.autoGradeMCQSubmissions(sessionId, tx);
+        
+        throw new ConflictException({
+          code: 'SESSION_EXPIRED',
+          message: 'The submission deadline has passed. The session was auto-submitted.',
+        });
+      }
+
+      const updatedSession = await tx.examSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'SUBMITTED',
+          submittedAt: now,
+          idempotencyKey: idempotencyKey || null,
+        },
+      });
+
+      await this.autoGradeMCQSubmissions(sessionId, tx);
+      await this.enqueueCodeSubmissions(sessionId, tx, correlationId);
+
+      return updatedSession;
+    });
+  }
+
+  async autoGradeMCQSubmissions(sessionId: string, tx: any) {
+    const submissions = await tx.submission.findMany({
+      where: { sessionId },
+      include: {
+        session: {
+          include: {
+            exam: {
+              include: {
+                questions: {
+                  include: { question: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    for (const sub of submissions) {
+      const examQuestion = sub.session.exam.questions.find((eq: any) => eq.questionId === sub.questionId);
+      if (!examQuestion) continue;
+      const q = examQuestion.question;
+      if (q.type === 'MCQ') {
+        const answerObj = sub.answer as any;
+        const selected = answerObj?.selectedOption;
+        const points = examQuestion.points !== null && examQuestion.points !== undefined ? examQuestion.points : q.points;
+        const isCorrect = selected === q.correctOption;
+        
+        await tx.submission.update({
+          where: { id: sub.id },
+          data: {
+            autoScore: isCorrect ? points : 0,
+            gradedAt: new Date(),
+          }
+        });
+      }
+    }
+  }
+
+  async enqueueCodeSubmissions(sessionId: string, tx: any, correlationId: string) {
+    const submissions = await tx.submission.findMany({
+      where: { sessionId },
+      include: {
+        session: {
+          include: {
+            exam: {
+              include: {
+                questions: {
+                  include: { question: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    for (const sub of submissions) {
+      const examQuestion = sub.session.exam.questions.find((eq: any) => eq.questionId === sub.questionId);
+      if (!examQuestion) continue;
+      const q = examQuestion.question;
+      if (q.type === 'CODE') {
+        const answerObj = sub.answer as any;
+        const code = answerObj?.code;
+        const language = answerObj?.language;
+
+        const job = {
+          submissionId: sub.id,
+          language,
+          code,
+          testCases: q.testCases || [],
+          idempotencyKey: sub.idempotencyKey || sub.id,
+          correlationId,
+        };
+
+        await this.redisService.getClient().rpush('judge:queue:submissions', JSON.stringify(job));
+      }
+    }
   }
 }

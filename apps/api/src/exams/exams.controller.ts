@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Delete,
+  Patch,
   Body,
   Param,
   Req,
@@ -14,6 +15,8 @@ import { Request } from 'express';
 import { ExamsService } from './exams.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { CreateExamDto } from './dto/create-exam.dto';
+import { SaveAnswerDto } from './dto/save-answer.dto';
+import { SubmitSessionDto } from './dto/submit-session.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 
@@ -112,5 +115,31 @@ export class ExamsController {
     const userId = (req.user as any).id;
     const role = (req.user as any).role;
     return this.examsService.getExamSession(examId, userId, role);
+  }
+
+  @Patch('exams/sessions/:sessionId/answers')
+  @Roles(Role.STUDENT, Role.PROCTOR, Role.ADMIN)
+  async saveDraftAnswer(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: SaveAnswerDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req.user as any).id;
+    return this.examsService.saveDraftAnswer(sessionId, userId, dto.questionId, dto.answer);
+  }
+
+  @Post('exams/sessions/:sessionId/submit')
+  @Roles(Role.STUDENT, Role.PROCTOR, Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async submitSession(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: SubmitSessionDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req.user as any).id;
+    const correlationId = (req as any).correlationId || 'unknown';
+    const keyFromHeader = req.headers['idempotency-key'] as string;
+    const idempotencyKey = dto.idempotencyKey || keyFromHeader;
+    return this.examsService.submitExamSession(sessionId, userId, correlationId, idempotencyKey);
   }
 }

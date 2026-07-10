@@ -4,38 +4,38 @@ import { Type } from 'class-transformer';
 export class ExamQuestionRelationDto {
   @IsString()
   @IsNotEmpty()
-  questionId: string;
+  questionId!: string;
 
   @IsInt()
   @Min(0)
-  order: number;
+  order!: number;
 
   @IsInt()
   @Min(0)
-  points: number;
+  points!: number;
 }
 
 export class CreateExamDto {
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @IsOptional()
   @IsString()
   description?: string;
 
   @IsDateString()
-  startsAt: string;
+  startsAt!: string;
 
   @IsDateString()
-  endsAt: string;
+  endsAt!: string;
 
   @IsInt()
   @Min(1)
-  durationMinutes: number;
+  durationMinutes!: number;
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ExamQuestionRelationDto)
-  questions: ExamQuestionRelationDto[];
+  questions!: ExamQuestionRelationDto[];
 }

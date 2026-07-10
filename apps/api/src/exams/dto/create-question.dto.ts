@@ -5,19 +5,19 @@ import { Type } from 'class-transformer';
 export class McqOptionDto {
   @IsString()
   @IsNotEmpty()
-  id: string;
+  id!: string;
 
   @IsString()
   @IsNotEmpty()
-  text: string;
+  text!: string;
 }
 
 export class TestCaseDto {
   @IsString()
-  input: string;
+  input!: string;
 
   @IsString()
-  expectedOutput: string;
+  expectedOutput!: string;
 
   @IsOptional()
   isPublic?: boolean = true;
@@ -25,11 +25,11 @@ export class TestCaseDto {
 
 export class CreateQuestionDto {
   @IsEnum(QuestionType)
-  type: QuestionType;
+  type!: QuestionType;
 
   @IsString()
   @IsNotEmpty()
-  prompt: string;
+  prompt!: string;
 
   @IsOptional()
   @IsArray()
@@ -53,7 +53,7 @@ export class CreateQuestionDto {
 
   @IsInt()
   @Min(0)
-  points: number;
+  points!: number;
 
   @IsOptional()
   @IsString()

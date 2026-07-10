@@ -1,8 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExamsService } from './exams.service';
 import { PrismaService } from '../prisma.service';
-import { NotFoundException, ConflictException } from '@nestjs/common';
+import { NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { QuestionType } from '@prisma/client';
+import { RedisService } from '../common/redis.service';
 
 describe('ExamsService', () => {
   let service: ExamsService;
@@ -31,11 +32,18 @@ describe('ExamsService', () => {
     $transaction: jest.fn((callback: (tx: any) => any) => callback(mockPrismaService)),
   };
 
+  const mockRedisService = {
+    getClient: jest.fn().mockReturnValue({
+      rpush: jest.fn().mockResolvedValue(1),
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExamsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 
@@ -223,6 +231,123 @@ describe('ExamsService', () => {
       expect(mcqQ.correctOption).toBeUndefined();
       expect(codeQ.testCases).toHaveLength(1);
       expect(codeQ.testCases[0].isPublic).toBe(true);
+    });
+  });
+
+  describe('saveDraftAnswer', () => {
+    it('should throw ForbiddenException if user does not match session', async () => {
+      mockPrismaService.examSession.findUnique.mockResolvedValue({
+        id: 'session_123',
+        userId: 'user_other',
+        exam: { durationMinutes: 60, endsAt: new Date(Date.now() + 3600000) },
+      });
+
+      await expect(
+        service.saveDraftAnswer('session_123', 'user_123', 'q_123', { selectedOption: 'a' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw ConflictException if session status is not IN_PROGRESS', async () => {
+      mockPrismaService.examSession.findUnique.mockResolvedValue({
+        id: 'session_123',
+        userId: 'user_123',
+        status: 'SUBMITTED',
+        startedAt: new Date(),
+        exam: { durationMinutes: 60, endsAt: new Date(Date.now() + 3600000) },
+      });
+
+      await expect(
+        service.saveDraftAnswer('session_123', 'user_123', 'q_123', { selectedOption: 'a' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should upsert submission if active and valid', async () => {
+      mockPrismaService.examSession.findUnique.mockResolvedValue({
+        id: 'session_123',
+        userId: 'user_123',
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+        exam: { durationMinutes: 60, endsAt: new Date(Date.now() + 3600000) },
+      });
+
+      mockPrismaService.submission = {
+        upsert: jest.fn().mockResolvedValue({ id: 'sub_123' }),
+      };
+
+      const result = await service.saveDraftAnswer('session_123', 'user_123', 'q_123', {
+        selectedOption: 'a',
+      });
+      expect(result.id).toBe('sub_123');
+      expect(prisma.submission.upsert).toHaveBeenCalled();
+    });
+  });
+
+  describe('submitExamSession', () => {
+    it('should successfully submit exam and run MCQ auto-grading', async () => {
+      const mockSession = {
+        id: 'session_123',
+        userId: 'user_123',
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+        examId: 'exam_123',
+      };
+
+      mockPrismaService.$queryRaw.mockResolvedValue([mockSession]);
+      mockPrismaService.exam.findUnique.mockResolvedValue({
+        id: 'exam_123',
+        durationMinutes: 60,
+        endsAt: new Date(Date.now() + 3600000),
+      });
+
+      mockPrismaService.examSession.update = jest.fn().mockResolvedValue({
+        ...mockSession,
+        status: 'SUBMITTED',
+      });
+
+      mockPrismaService.submission.findMany = jest.fn().mockResolvedValue([
+        {
+          id: 'sub_mcq',
+          questionId: 'q_mcq',
+          answer: { selectedOption: 'a' },
+          session: {
+            exam: {
+              questions: [
+                {
+                  questionId: 'q_mcq',
+                  points: 5,
+                  question: { type: 'MCQ', correctOption: 'a', points: 5 },
+                },
+              ],
+            },
+          },
+        },
+      ]);
+
+      mockPrismaService.submission.update = jest.fn().mockResolvedValue({});
+
+      const result = await service.submitExamSession('session_123', 'user_123', 'corr_123');
+
+      expect(result.status).toBe('SUBMITTED');
+      expect(prisma.submission.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sub_mcq' },
+          data: expect.objectContaining({ autoScore: 5 }),
+        }),
+      );
+    });
+
+    it('should allow submit replay if idempotency key matches', async () => {
+      const mockSession = {
+        id: 'session_123',
+        userId: 'user_123',
+        status: 'SUBMITTED',
+        idempotencyKey: 'key_123',
+      };
+
+      mockPrismaService.$queryRaw.mockResolvedValue([mockSession]);
+
+      const result = await service.submitExamSession('session_123', 'user_123', 'corr_123', 'key_123');
+      expect(result.status).toBe('SUBMITTED');
     });
   });
 });
