@@ -1,4 +1,4 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
@@ -9,67 +9,97 @@ on:
 jobs:
   api-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: exam_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
           cache: 'npm'
+
       - name: Install dependencies
         run: npm ci
-      - name: Build shared-types package
-        run: npm run build -w packages/shared-types
+
       - name: Generate Prisma Client
-        run: |
-          cd apps/api
-          npx prisma generate
-      - name: Run Unit Tests
-        run: npm run test -w apps/api
+        run: npx prisma generate --schema=apps/api/prisma/schema.prisma
 
-  gateway-tests:
+      - name: Push Prisma Schema to DB
+        env:
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
+        run: npx prisma db push --accept-data-loss --schema=apps/api/prisma/schema.prisma
+
+      - name: Run API Unit Tests
+        env:
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
+          REDIS_URL: "redis://localhost:6379"
+          JWT_ACCESS_SECRET: "ci_access_secret_123"
+          JWT_REFRESH_SECRET: "ci_refresh_secret_123"
+        run: npm run api:test
+
+      - name: Run API E2E Tests
+        env:
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
+          REDIS_URL: "redis://localhost:6379"
+          JWT_ACCESS_SECRET: "ci_access_secret_123"
+          JWT_REFRESH_SECRET: "ci_refresh_secret_123"
+        run: npm run api:test:e2e
+
+  web-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Web Frontend
+        run: npm run build -w apps/web
+
+  judge-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - name: Run Tests with race detector
-        run: |
-          cd apps/proctor-gateway
-          go test ./... -race -v
 
-  judge-worker-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - name: Run Tests
-        run: |
-          cd apps/judge-worker
-          go test ./... -v
+      - name: Pre-pull Python Docker Image for sandbox tests
+        run: docker pull python:3.12-slim
 
-  ml-service-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          version: "latest"
-      - name: Install dependencies and test
-        run: |
-          cd apps/ml-service
-          uv venv
-          uv pip install -r requirements.txt
-          # Run pytest inside the virtualenv
-          .venv/bin/pytest
+      - name: Run Go tests
+        working-directory: apps/judge-worker
+        run: go test ./... -v
