@@ -108,15 +108,16 @@ enum SessionStatus {
 }
 
 model ExamSession {
-  id           String        @id @default(uuid())
-  examId       String
-  userId       String
-  status       SessionStatus @default(NOT_STARTED)
-  startedAt    DateTime?
-  submittedAt  DateTime?
-  score        Float?
-  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
-  submissions  Submission[]
+  id             String        @id @default(uuid())
+  examId         String
+  userId         String
+  status         SessionStatus @default(NOT_STARTED)
+  startedAt      DateTime?
+  submittedAt    DateTime?
+  score          Float?
+  idempotencyKey String?       @unique   // Added for idempotency
+  exam           Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  submissions    Submission[]
 
   @@unique([examId, userId])   // one session per candidate per exam — enforces the single-active-session rule at the DB level
 }
