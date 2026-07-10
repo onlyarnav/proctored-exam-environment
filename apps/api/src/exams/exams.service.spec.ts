@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExamsService } from './exams.service';
 import { PrismaService } from '../prisma.service';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ConflictException } from '@nestjs/common';
 import { QuestionType } from '@prisma/client';
 
 describe('ExamsService', () => {
@@ -27,6 +27,7 @@ describe('ExamsService', () => {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn((callback: (tx: any) => any) => callback(mockPrismaService)),
   };
 
@@ -104,6 +105,124 @@ describe('ExamsService', () => {
       expect(result?.id).toBe('exam_123');
       expect(prisma.exam.create).toHaveBeenCalled();
       expect(prisma.examQuestion.createMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('startExamSession', () => {
+    it('should throw ConflictException if exam has not started yet', async () => {
+      const startsAt = new Date();
+      startsAt.setDate(startsAt.getDate() + 1); // tomorrow
+
+      mockPrismaService.exam.findUnique.mockResolvedValue({
+        id: 'exam_123',
+        startsAt,
+        endsAt: new Date(startsAt.getTime() + 60000),
+      });
+
+      await expect(service.startExamSession('exam_123', 'user_123')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('should throw ConflictException if exam has ended', async () => {
+      const endsAt = new Date();
+      endsAt.setDate(endsAt.getDate() - 1); // yesterday
+
+      mockPrismaService.exam.findUnique.mockResolvedValue({
+        id: 'exam_123',
+        startsAt: new Date(endsAt.getTime() - 60000),
+        endsAt,
+      });
+
+      await expect(service.startExamSession('exam_123', 'user_123')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('should create session if active and no session exists', async () => {
+      const startsAt = new Date(Date.now() - 3600000);
+      const endsAt = new Date(Date.now() + 3600000);
+
+      mockPrismaService.exam.findUnique.mockResolvedValue({
+        id: 'exam_123',
+        startsAt,
+        endsAt,
+      });
+
+      mockPrismaService.$queryRaw.mockResolvedValue([]); // no session locked
+      mockPrismaService.examSession = {
+        create: jest.fn().mockResolvedValue({
+          id: 'session_123',
+          status: 'IN_PROGRESS',
+        }),
+        update: jest.fn(),
+      };
+
+      const result = await service.startExamSession('exam_123', 'user_123');
+      expect(result.id).toBe('session_123');
+      expect(result.status).toBe('IN_PROGRESS');
+    });
+
+    it('should throw ConflictException if session is already SUBMITTED', async () => {
+      const startsAt = new Date(Date.now() - 3600000);
+      const endsAt = new Date(Date.now() + 3600000);
+
+      mockPrismaService.exam.findUnique.mockResolvedValue({
+        id: 'exam_123',
+        startsAt,
+        endsAt,
+      });
+
+      mockPrismaService.$queryRaw.mockResolvedValue([{ id: 'session_123', status: 'SUBMITTED' }]);
+
+      await expect(service.startExamSession('exam_123', 'user_123')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+  });
+
+  describe('getExamSession', () => {
+    it('should strip correctOption and non-public test cases for STUDENT role', async () => {
+      const mockSession = {
+        id: 'session_123',
+        exam: {
+          questions: [
+            {
+              question: {
+                id: 'q_mcq',
+                type: 'MCQ',
+                prompt: 'Q1',
+                options: [{ id: 'a', text: 'Ans' }],
+                correctOption: 'a',
+              },
+            },
+            {
+              question: {
+                id: 'q_code',
+                type: 'CODE',
+                prompt: 'Q2',
+                testCases: [
+                  { input: '1', expectedOutput: '2', isPublic: true },
+                  { input: '3', expectedOutput: '4', isPublic: false },
+                ],
+              },
+            },
+          ],
+        },
+      };
+
+      mockPrismaService.examSession = {
+        findUnique: jest.fn().mockResolvedValue(mockSession),
+      };
+
+      const result = await service.getExamSession('exam_123', 'user_123', 'STUDENT');
+
+      const mcqQ = result.exam.questions[0].question;
+      const codeQ = result.exam.questions[1].question;
+
+      expect(mcqQ.correctOption).toBeUndefined();
+      expect(codeQ.testCases).toHaveLength(1);
+      expect(codeQ.testCases[0].isPublic).toBe(true);
     });
   });
 });

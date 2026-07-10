@@ -94,4 +94,23 @@ export class ExamsController {
   async deleteExam(@Param('id') id: string) {
     await this.examsService.deleteExam(id);
   }
+
+  // ==========================================
+  // CANDIDATE SESSION ENDPOINTS
+  // ==========================================
+
+  @Post('exams/:id/start')
+  @Roles(Role.STUDENT, Role.PROCTOR, Role.ADMIN)
+  async startSession(@Param('id') examId: string, @Req() req: Request) {
+    const userId = (req.user as any).id;
+    return this.examsService.startExamSession(examId, userId);
+  }
+
+  @Get('exams/:id/session')
+  @Roles(Role.STUDENT, Role.PROCTOR, Role.ADMIN)
+  async getSession(@Param('id') examId: string, @Req() req: Request) {
+    const userId = (req.user as any).id;
+    const role = (req.user as any).role;
+    return this.examsService.getExamSession(examId, userId, role);
+  }
 }

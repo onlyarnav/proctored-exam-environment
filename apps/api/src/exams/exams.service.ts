@@ -188,4 +188,144 @@ export class ExamsService {
       where: { id },
     });
   }
+
+  // ==========================================
+  // CANDIDATE EXAM SESSIONS
+  // ==========================================
+
+  async startExamSession(examId: string, userId: string) {
+    const now = new Date();
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+    });
+    if (!exam) {
+      throw new NotFoundException(`Exam with ID ${examId} not found`);
+    }
+
+    if (now < exam.startsAt) {
+      throw new ConflictException({
+        code: 'EXAM_NOT_STARTED',
+        message: 'This exam has not started yet',
+      });
+    }
+    if (now > exam.endsAt) {
+      throw new ConflictException({
+        code: 'EXAM_HAS_ENDED',
+        message: 'This exam has already ended',
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Row locking on ExamSession
+      const sessions = await tx.$queryRaw<any[]>`
+        SELECT * FROM "ExamSession" 
+        WHERE "examId" = ${examId} AND "userId" = ${userId} 
+        LIMIT 1 
+        FOR UPDATE
+      `;
+
+      let session = sessions.length > 0 ? sessions[0] : null;
+
+      if (!session) {
+        // Create new session in IN_PROGRESS
+        session = await tx.examSession.create({
+          data: {
+            examId,
+            userId,
+            status: 'IN_PROGRESS',
+            startedAt: now,
+          },
+        });
+      } else {
+        if (session.status === 'NOT_STARTED') {
+          session = await tx.examSession.update({
+            where: { id: session.id },
+            data: {
+              status: 'IN_PROGRESS',
+              startedAt: now,
+            },
+          });
+        } else if (session.status === 'IN_PROGRESS') {
+          // Already in progress, just return
+        } else {
+          // SUBMITTED or GRADED
+          throw new ConflictException({
+            code: 'INVALID_SESSION_TRANSITION',
+            message: `Cannot start exam session in status ${session.status}`,
+          });
+        }
+      }
+
+      return session;
+    });
+  }
+
+  async getExamSession(examId: string, userId: string, role: string) {
+    const session = await this.prisma.examSession.findUnique({
+      where: { examId_userId: { examId, userId } },
+      include: {
+        exam: {
+          include: {
+            questions: {
+              include: { question: true },
+              orderBy: { order: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`No exam session found for exam ${examId} and user ${userId}`);
+    }
+
+    // Strip answers/correct options if student
+    if (role === 'STUDENT') {
+      const strippedQuestions = session.exam.questions.map((eq: any) => {
+        const q = eq.question;
+        if (q.type === 'MCQ') {
+          return {
+            ...eq,
+            question: {
+              id: q.id,
+              type: q.type,
+              prompt: q.prompt,
+              options: q.options,
+              points: q.points,
+              topic: q.topic,
+              difficulty: q.difficulty,
+            },
+          };
+        } else if (q.type === 'CODE') {
+          const testCases = Array.isArray(q.testCases)
+            ? q.testCases.filter((tc: any) => tc.isPublic !== false)
+            : null;
+          return {
+            ...eq,
+            question: {
+              id: q.id,
+              type: q.type,
+              prompt: q.prompt,
+              starterCode: q.starterCode,
+              testCases,
+              points: q.points,
+              topic: q.topic,
+              difficulty: q.difficulty,
+            },
+          };
+        }
+        return eq;
+      });
+
+      return {
+        ...session,
+        exam: {
+          ...session.exam,
+          questions: strippedQuestions,
+        },
+      };
+    }
+
+    return session;
+  }
 }
