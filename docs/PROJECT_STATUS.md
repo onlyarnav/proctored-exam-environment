@@ -36,11 +36,11 @@
 |---|---|---|
 | 2026-07-10 | MCQ only or MCQ + coding? | **Both.** `judge-worker` is in scope for Phase 2, not deferred. |
 | 2026-07-10 | Gridixa SSO or standalone auth? | **Standalone.** Own `User`/`RefreshToken` tables in `apps/api`, no external IdP dependency for v1. Auth module stays behind an interface so a future OIDC/SSO bridge doesn't require a rewrite. |
+| 2026-07-10 | Webcam frame capture interval | **1 frame / 2 seconds.** Standard interval selected for balance between network load and detection accuracy. |
+| 2026-07-10 | Auto-submit leftover sessions | **Confirmed.** Leftover exam sessions are automatically submitted when the duration limits expire. |
 
 ## Open questions (still need answers before the relevant phase)
 
-- [ ] Expected exam duration and number of concurrent exam *events* (1000 users in one sitting vs 1000 spread across sessions) — affects Redis Streams sizing (needed before Phase 3)
-- [ ] Frame capture interval for webcam checks (proposed default: 1 frame / 2s) — confirm false-positive/negative tradeoff (needed before Phase 3)
 - [ ] Data retention policy for flagged frames (proposed default: 90 days, auto-delete from MinIO) (needed before Phase 4, feeds Phase 6 compliance)
 - [ ] Hosting target for production (cloud provider) — affects Phase 5 k8s manifests (needed before Phase 5)
 - [ ] Confirm whether Gridixa has an existing legal review process for biometric/webcam data (near-certain DPDP Act 2023 applicability given India-focused student data) (needed before Phase 6)
