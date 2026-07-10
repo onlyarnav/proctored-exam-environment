@@ -75,7 +75,7 @@ export class AuthService {
     }
 
     // Generate Tokens
-    const accessToken = this.generateAccessToken(user.id, user.role, correlationId);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role, correlationId);
     const rawRefreshToken = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(rawRefreshToken);
     const expiresAt = new Date();
@@ -204,7 +204,7 @@ export class AuthService {
       });
 
       // Generate access token
-      const accessToken = this.generateAccessToken(user.id, user.role, correlationId);
+      const accessToken = this.generateAccessToken(user.id, user.email, user.role, correlationId);
 
       return {
         accessToken,
@@ -225,9 +225,10 @@ export class AuthService {
     });
   }
 
-  private generateAccessToken(userId: string, role: Role, correlationId: string): string {
+  private generateAccessToken(userId: string, email: string, role: Role, correlationId: string): string {
     const payload = {
       sub: userId,
+      email,
       role,
       correlationId,
     };

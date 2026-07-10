@@ -34,8 +34,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const errorMsg = (resContent as any).message;
         message = Array.isArray(errorMsg) ? errorMsg[0] : errorMsg || exception.message;
         
-        // Handle validation errors from class-validator
-        if (status === HttpStatus.BAD_REQUEST && Array.isArray((resContent as any).message)) {
+        const customCode = (resContent as any).code;
+        if (customCode) {
+          code = customCode;
+        } else if (status === HttpStatus.BAD_REQUEST && Array.isArray((resContent as any).message)) {
           code = ErrorCode.VALIDATION_ERROR;
           details = { validationErrors: (resContent as any).message };
         } else {

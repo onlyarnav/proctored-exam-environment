@@ -3,6 +3,7 @@ import { INestApplication, HttpStatus, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { RateLimitMiddleware } from '../src/common/middleware/rate-limit.middleware';
 
 describe('AuthController (e2e)', () => {
   let app: INestApplication;
@@ -32,6 +33,9 @@ describe('AuthController (e2e)', () => {
     await prisma.refreshToken.deleteMany({});
     await prisma.auditLog.deleteMany({});
     await prisma.user.deleteMany({});
+    
+    // Clear rate limit store
+    RateLimitMiddleware.store.clear();
   });
 
   afterAll(async () => {

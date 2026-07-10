@@ -9,7 +9,7 @@ interface RateLimitInfo {
 @Injectable()
 export class RateLimitMiddleware implements NestMiddleware {
   // In-memory fallback store
-  private readonly store = new Map<string, RateLimitInfo>();
+  public static readonly store = new Map<string, RateLimitInfo>();
   
   // Rate limit config: max 5 requests per 60 seconds
   private readonly windowMs = 60 * 1000;
@@ -24,11 +24,11 @@ export class RateLimitMiddleware implements NestMiddleware {
     const correlationId = (request as any).correlationId || (request.headers['x-correlation-id'] as string) || 'unknown';
 
     const now = Date.now();
-    let clientInfo = this.store.get(key);
+    let clientInfo = RateLimitMiddleware.store.get(key);
 
     if (!clientInfo) {
       clientInfo = { timestamps: [] };
-      this.store.set(key, clientInfo);
+      RateLimitMiddleware.store.set(key, clientInfo);
     }
 
     // Filter out timestamps outside the window

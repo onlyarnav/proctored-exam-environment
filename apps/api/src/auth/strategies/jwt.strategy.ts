@@ -5,6 +5,7 @@ import { Role } from '@prisma/client';
 
 export interface JwtPayload {
   sub: string;
+  email: string;
   role: Role;
   correlationId: string;
 }
@@ -20,6 +21,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload) {
-    return { id: payload.sub, role: payload.role, correlationId: payload.correlationId };
+    return { id: payload.sub, email: payload.email, role: payload.role, correlationId: payload.correlationId };
   }
 }
