@@ -132,6 +132,7 @@ model Submission {
   idempotencyKey String?     @unique   // dedupes retried submit calls
   createdAt      DateTime    @default(now())
   session        ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  results        Json?       // CODE results: [{ input, expectedOutput, actualOutput, passed, runtimeMs, error }]
 
   @@unique([sessionId, questionId])   // one submission per question per session — resubmits UPDATE, not INSERT
 }
