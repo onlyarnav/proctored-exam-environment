@@ -124,6 +124,141 @@ export default function ExamPage({ params }: { params: Promise<{ examId: string 
     return () => clearInterval(timer);
   }, [timeLeft]);
 
+  // WebSocket references
+  const wsRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Helper to send integrity event with binary framing
+  const sendIntegrityEvent = (ws: WebSocket, eventType: string) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    const payload = JSON.stringify({
+      eventType,
+      clientTimestamp: Date.now(),
+    });
+
+    const encoder = new TextEncoder();
+    const payloadBytes = encoder.encode(payload);
+
+    const packet = new Uint8Array(9 + payloadBytes.byteLength);
+    packet[0] = 0x02; // type integrity event
+
+    const ts = Date.now();
+    const tsView = new DataView(packet.buffer);
+    const hi = Math.floor(ts / 0x100000000);
+    const lo = ts % 0x100000000;
+    tsView.setUint32(1, hi);
+    tsView.setUint32(5, lo);
+
+    packet.set(payloadBytes, 9);
+    ws.send(packet);
+  };
+
+  // Proctoring WebSocket Connection & Capture Logic
+  useEffect(() => {
+    if (!session || session.status !== 'IN_PROGRESS' || !(session as any).wsToken) {
+      return;
+    }
+
+    const wsToken = (session as any).wsToken;
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:8080/ws?token=${wsToken}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('Proctoring WebSocket connected');
+    };
+
+    ws.onclose = (e) => {
+      console.log('Proctoring WebSocket closed', e.code, e.reason);
+    };
+
+    ws.onerror = (err) => {
+      console.error('Proctoring WebSocket error', err);
+    };
+
+    // 1. Setup Webcam capturing
+    let captureInterval: NodeJS.Timeout;
+    const video = document.createElement('video');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })
+      .then((stream) => {
+        streamRef.current = stream;
+        video.srcObject = stream;
+        video.play();
+
+        // Capture webcam frame every 2 seconds
+        captureInterval = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          canvas.width = 320;
+          canvas.height = 240;
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, 320, 240);
+            canvas.toBlob((blob) => {
+              if (blob) {
+                blob.arrayBuffer().then((buffer) => {
+                  const packet = new Uint8Array(9 + buffer.byteLength);
+                  packet[0] = 0x01; // type webcam frame
+
+                  const ts = Date.now();
+                  const tsView = new DataView(packet.buffer);
+                  const hi = Math.floor(ts / 0x100000000);
+                  const lo = ts % 0x100000000;
+                  tsView.setUint32(1, hi);
+                  tsView.setUint32(5, lo);
+
+                  packet.set(new Uint8Array(buffer), 9);
+                  ws.send(packet);
+                });
+              }
+            }, 'image/jpeg', 0.6); // 0.6 quality compression
+          }
+        }, 2000);
+      })
+      .catch((err) => {
+        console.warn('Failed to access webcam or webcam not available', err);
+        // Report webcam permission issue or availability issue as an integrity event
+        sendIntegrityEvent(ws, 'DEVTOOLS_SUSPECTED'); // default or a fallback event
+      });
+
+    // 2. Setup Integrity event listeners
+    const handleVisibilityChange = () => {
+      const state = document.visibilityState;
+      const type = state === 'hidden' ? 'VISIBILITY_HIDDEN' : 'VISIBILITY_VISIBLE';
+      sendIntegrityEvent(ws, type);
+    };
+
+    const handleBlur = () => sendIntegrityEvent(ws, 'TAB_BLUR');
+    const handleFocus = () => sendIntegrityEvent(ws, 'TAB_FOCUS');
+    const handleCopy = () => sendIntegrityEvent(ws, 'COPY');
+    const handlePaste = () => sendIntegrityEvent(ws, 'PASTE');
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('paste', handlePaste);
+
+    return () => {
+      clearInterval(captureInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('copy', handleCopy);
+      document.removeEventListener('paste', handlePaste);
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [session?.id, session?.status]);
+
   // 3. Debounced Autosave Answer
   const saveAnswerDraft = async (questionId: string, answer: any) => {
     // Clear previous timeout for this question
