@@ -24,8 +24,8 @@ func TestShutdownDraining(t *testing.T) {
 	// Wait a moment for goroutine to pick it up
 	time.Sleep(100 * time.Millisecond)
 
-	assert.True(t, Draining)
+	assert.True(t, ws.Draining)
 
 	// Clean up draining state
-	Draining = false
+	ws.Draining = false
 }

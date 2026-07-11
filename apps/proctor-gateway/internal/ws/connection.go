@@ -47,11 +47,18 @@ type Connection struct {
 	closeOnce     sync.Once
 }
 
+// Draining is set to true during graceful shutdown to reject new upgrades
+var Draining bool = false
+
 // ServeWebSocket performs handshake-time validation (Origin checks and JWT verification)
 func ServeWebSocket(hub *Hub) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if !websocket.IsWebSocketUpgrade(c) {
 			return fiber.ErrUpgradeRequired
+		}
+
+		if Draining {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("Server is shutting down")
 		}
 
 		// 1. Origin verification
