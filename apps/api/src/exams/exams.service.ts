@@ -4,6 +4,7 @@ import { CreateQuestionDto } from './dto/create-question.dto';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { ErrorCode } from 'shared-types';
 import { RedisService } from '../common/redis.service';
+import * as jwt from 'jsonwebtoken';
 
 @Injectable()
 export class ExamsService {
@@ -260,7 +261,17 @@ export class ExamsService {
         }
       }
 
-      return session;
+      const wsToken = this.generateWSSessionToken(
+        session.id,
+        session.userId,
+        session.examId,
+        exam.durationMinutes,
+      );
+
+      return {
+        ...session,
+        wsToken,
+      };
     });
   }
 
@@ -282,6 +293,13 @@ export class ExamsService {
     if (!session) {
       throw new NotFoundException(`No exam session found for exam ${examId} and user ${userId}`);
     }
+
+    const wsToken = this.generateWSSessionToken(
+      session.id,
+      session.userId,
+      session.examId,
+      session.exam.durationMinutes,
+    );
 
     // Strip answers/correct options if student
     if (role === 'STUDENT') {
@@ -327,10 +345,14 @@ export class ExamsService {
           ...session.exam,
           questions: strippedQuestions,
         },
+        wsToken,
       };
     }
 
-    return session;
+    return {
+      ...session,
+      wsToken,
+    };
   }
 
   async saveDraftAnswer(sessionId: string, userId: string, questionId: string, answer: any) {
@@ -550,5 +572,17 @@ export class ExamsService {
         await this.redisService.getClient().rpush('judge:queue:submissions', JSON.stringify(job));
       }
     }
+  }
+
+  private generateWSSessionToken(sessionId: string, userId: string, examId: string, durationMinutes?: number): string {
+    const payload = {
+      sessionId,
+      userId,
+      examId,
+    };
+    const secret = process.env.JWT_WS_SECRET || 'dev_ws_secret_do_not_use_in_prod_1234567890';
+    const duration = durationMinutes || 60;
+    const expiresIn = duration * 60 + 600; // duration + 10 mins grace in seconds
+    return jwt.sign(payload, secret, { expiresIn });
   }
 }
