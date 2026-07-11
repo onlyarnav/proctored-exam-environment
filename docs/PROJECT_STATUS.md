@@ -1,7 +1,7 @@
 # Project Status — AI Olympiad Proctored Exam Platform
 
 **Last updated:** 2026-07-10
-**Current phase:** Phase 2 complete — Phase 3 up next
+**Current phase:** Phase 3 complete — Phase 4 up next
 
 ## Phase overview
 
@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 1 | Foundation & Infrastructure | Done | Monorepo, Docker Compose, DB schema, auth skeleton |
 | 2 | Core Exam Engine | Done | Exam CRUD, sessions, autosave, manual submit, auto-grader & Go sandbox |
-| 3 | Realtime Proctoring Gateway | Not started | Go WS gateway, event/frame ingestion, Redis Streams |
+| 3 | Realtime Proctoring Gateway | Done | Go WS gateway, Origin + JWT validation, event/frame ingestion, rate-limiting, grace reconnects, NestJS & Next.js integration |
 | 4 | ML Flagging Service | Not started | Face/gaze/object detection, flag pipeline, MinIO |
 | 5 | Scale, Load Test & Deploy | Not started | k8s, load testing to 1000 concurrent, observability |
 | 6 | Hardening, Compliance & Handover | Not started | DPDP/biometric-data compliance, DR, cost, docs handover to Gridixa |
@@ -29,6 +29,7 @@
 | 2026-07-10 | Ephemeral Docker Sandboxing | Restricting container execution boundaries (network none, 128m memory, 0.5 cpus, pids-limit 20, read-only root, 10m tmpfs) prevents sandbox escapes and fork bombs |
 | 2026-07-10 | Postgres ROW Locks for Exam Session transitions | Using `SELECT FOR UPDATE` inside a database transaction guarantees strict state transitions and prevents double session starts |
 | 2026-07-10 | Debounced autosave & payload filtering | Debouncing draft updates reduces database write overhead. Stripping MCQ correctOption & non-public testCases preserves exam integrity |
+| 2026-07-11 | Binary WS framing (0x01/0x02) & local degraded buffering | Standardized binary header layout prevents JSON parsing overhead for frames. Buffering up to 5 items locally during Redis outages prevents data loss. |
 
 ## Resolved questions
 
@@ -47,4 +48,4 @@
 
 ## Next action
 
-Start Phase 3 — see `docs/PHASE_3_REALTIME_PROCTORING.md` to design and implement the realtime gateway for websocket streaming.
+Start Phase 4 — see `docs/PHASE_4_ML_FLAGGING.md` to design and implement the face/gaze/object detection ML pipeline.
