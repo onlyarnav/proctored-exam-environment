@@ -4,10 +4,14 @@ import (
 	"os"
 
 	"proctor-gateway/internal/health"
+	"proctor-gateway/internal/ingest"
 	"proctor-gateway/internal/middleware"
+	"proctor-gateway/internal/registry"
+	"proctor-gateway/internal/shutdown"
 	"proctor-gateway/internal/ws"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -17,27 +21,69 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
 
-	// Initialize Fiber App
+	// 1. Initialize Redis Client
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatal().Err(err).Str("url", redisURL).Msg("Failed to parse Redis URL")
+	}
+	rdb := redis.NewClient(opt)
+
+	// 2. Initialize Core Components
+	presence := registry.NewPresenceRegistry(rdb)
+	ingester := ingest.NewIngester(rdb)
+	hub := ws.NewHub(rdb, presence, ingester)
+
+	// 3. Initialize Fiber App
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
 
-	// Setup WebSocket Hub
-	hub := ws.NewHub()
-	go hub.Run()
-
-	// Register global middleware
+	// 4. Register global middleware
 	app.Use(middleware.Correlation())
 	app.Use(middleware.Recover())
 
-	// Health endpoint
+	// 5. Expose Health Endpoint
 	app.Get("/health", health.Handler)
 
-	// WebSocket upgrading endpoints
-	app.Use("/ws", ws.ServeWebSocket(hub))
-	app.Get("/ws", ws.Handler(hub))
+	// 6. Expose Internal Presence Registry Endpoint for admin queries
+	app.Get("/internal/presence", func(c *fiber.Ctx) error {
+		all, err := presence.GetAllPresence()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(all)
+	})
 
-	// Get port from env or default to 8080
+	app.Get("/internal/presence/:sessionId", func(c *fiber.Ctx) error {
+		sessionID := c.Params("sessionId")
+		info, err := presence.GetPresence(sessionID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		if info == nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "presence not found",
+			})
+		}
+		return c.JSON(info)
+	})
+
+	// 7. WebSocket upgrading endpoints
+	app.Use("/ws", ws.ServeWebSocket(hub))
+	app.Get("/ws", ws.Handler(hub, ingester, presence))
+
+	// 8. Start Graceful Shutdown listener
+	shutdown.ListenForShutdown(app, hub)
+
+	// 9. Start Server Listener
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
