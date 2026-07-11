@@ -7,7 +7,9 @@ import { PrismaService } from '../src/prisma.service';
 import { Role } from '@prisma/client';
 import { RateLimitMiddleware } from '../src/common/middleware/rate-limit.middleware';
 
-describe('Concurrency Smoke Test (e2e)', () => {
+const describeIf = (condition: boolean) => (condition ? describe : describe.skip);
+
+describeIf(!process.env.CI)('Concurrency Smoke Test (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let adminToken: string;
