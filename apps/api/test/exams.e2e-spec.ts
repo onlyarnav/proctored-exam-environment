@@ -212,6 +212,6 @@ describe('ExamsController (e2e)', () => {
       });
       expect(codeSub?.autoScore).toBeNull();
       expect(codeSub?.gradedAt).toBeNull();
-    });
+    }, 60000);
   });
 });

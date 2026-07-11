@@ -1,11 +1,13 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { RedisService } from '../common/redis.service';
+import Redis from 'ioredis';
 
 @Injectable()
 export class JudgeService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('JudgeService');
   private isClosed = false;
+  private consumerClient?: Redis;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -20,15 +22,18 @@ export class JudgeService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy() {
     this.isClosed = true;
+    if (this.consumerClient) {
+      this.consumerClient.disconnect();
+    }
   }
 
   async listenForResults() {
-    const redis = this.redisService.getClient();
+    this.consumerClient = this.redisService.getClient().duplicate();
     this.logger.log('Starting judge results consumer loop...');
 
     while (!this.isClosed) {
       try {
-        const res = await redis.blpop('judge:results', 0);
+        const res = await this.consumerClient.blpop('judge:results', 0);
         if (this.isClosed) break;
         if (!res || res.length < 2) continue;
         
