@@ -51,21 +51,21 @@ jobs:
 
       - name: Push Prisma Schema to DB
         env:
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
+          DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/exam_platform?schema=public"
         run: npx prisma db push --accept-data-loss --schema=apps/api/prisma/schema.prisma
 
       - name: Run API Unit Tests
         env:
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
-          REDIS_URL: "redis://localhost:6379"
+          DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/exam_platform?schema=public"
+          REDIS_URL: "redis://127.0.0.1:6379"
           JWT_ACCESS_SECRET: "ci_access_secret_123"
           JWT_REFRESH_SECRET: "ci_refresh_secret_123"
         run: npm run api:test
 
       - name: Run API E2E Tests
         env:
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/exam_platform?schema=public"
-          REDIS_URL: "redis://localhost:6379"
+          DATABASE_URL: "postgresql://postgres:password@127.0.0.1:5432/exam_platform?schema=public"
+          REDIS_URL: "redis://127.0.0.1:6379"
           JWT_ACCESS_SECRET: "ci_access_secret_123"
           JWT_REFRESH_SECRET: "ci_refresh_secret_123"
         run: npm run api:test:e2e
@@ -102,4 +102,31 @@ jobs:
 
       - name: Run Go tests
         working-directory: apps/judge-worker
+        run: go test ./... -v
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Go tests
+        working-directory: apps/proctor-gateway
+        env:
+          REDIS_URL: "redis://127.0.0.1:6379"
         run: go test ./... -v
